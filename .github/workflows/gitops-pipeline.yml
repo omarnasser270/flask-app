@@ -1,0 +1,48 @@
+name: Flask GitOps Pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout application
+        uses: actions/checkout@v4
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/flask-app:latest
+            ${{ secrets.DOCKER_USERNAME }}/flask-app:${{ github.sha }}
+
+      - name: Checkout GitOps repository
+        uses: actions/checkout@v4
+        with:
+          repository: omarnasser270/flask-gitops
+          token: ${{ secrets.GITOPS_PAT }}
+          path: gitops
+
+      - name: Update image tag in manifest
+        working-directory: gitops
+        run: |
+          sed -i "s|image: .*|image: ${{ secrets.DOCKER_USERNAME }}/flask-app:${{ github.sha }}|" manifests/deployment.yaml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add manifests/deployment.yaml
+          git diff --cached --quiet || git commit -m "ci: deploy ${{ github.sha }}"
+          git push
